@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>辉煌条纹</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; width: 100vw; height: 100vh; }
+        #status-bar { position: absolute; top: 20px; left: 20px; z-index: 1000; background: rgba(15, 15, 15, 0.95); border: 1px solid #004488; border-radius: 12px; color: #fff; width: 280px; padding: 15px; }
+        #info-panel { position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%) translateY(30px); width: 90%; max-width: 1200px; background: rgba(10, 10, 10, 0.96); border: 2px solid #ffcc00; border-radius: 24px; padding: 35px; color: #fff; opacity: 0; pointer-events: none; transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1); backdrop-filter: blur(30px); z-index: 99; display: flex; flex-direction: column; align-items: center; }
+        #info-panel.active { opacity: 1; transform: translateX(-50%) translateY(0); }
+        #info-panel.layout-6 { left: 72%; width: 35%; max-width: 500px; bottom: 50%; transform: translate(-50%, 50%); text-align: left; align-items: flex-start; }
+        #info-panel.layout-6.active { transform: translate(-50%, 50%); }
+        #info-title { margin: 0 0 25px 0; font-size: 42px; font-weight: 800; text-transform: uppercase; }
+        .desc-container { display: flex; justify-content: center; gap: 30px; width: 100%; flex-wrap: wrap; }
+        #info-panel.layout-6 .desc-container { flex-direction: column; }
+        .point-item { flex: 1; min-width: 280px; font-size: 28px; line-height: 1.4; background: rgba(255,255,255,0.03); padding: 20px; border-radius: 15px; border-left: 5px solid transparent; }
+        .kw-locked { color: #555; text-decoration: underline dotted #444; }
+        .kw-found { color: #ffcc00; font-weight: bold; text-shadow: 0 0 10px rgba(255,204,0,0.5); }
+        #mic-status { color: #ff4444; font-weight: bold; margin-top: 8px; display:none; animation: blink 1s infinite; text-align: center; }
+        @keyframes blink { 50% { opacity: 0.3; } }
+        #victory-screen { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(10, 10, 10, 0.98); border: 3px solid #ffcc00; border-radius: 40px; padding: 60px; text-align: center; z-index: 3000; display: none; box-shadow: 0 0 100px rgba(255,204,0,0.4); }
+    </style>
+</head>
+<body>
+
+<div id="victory-screen">
+    <h1 style="color:#ffcc00; font-size: 60px; margin:0;">恭喜完成!</h1>
+    <p style="color:#fff; font-size: 24px; margin: 20px 0;">做得好！你已经完全掌握了马来西亚国旗的含义。</p>
+    <button onclick="handleReload()" style="padding:15px 40px; background:#ffcc00; border:none; border-radius:30px; font-weight:bold; cursor:pointer; font-size:18px;">重新开始</button>
+</div>
+
+<div id="status-bar">
+    <div style="font-size: 18px; color: #ffcc00; font-weight: bold; margin-bottom: 10px;">辉煌条纹</div>
+    <div id="mic-status">🎤 正在聆听...</div>
+</div>
+
+<div id="info-panel">
+    <h2 id="info-title">标题</h2>
+    <div id="info-desc" class="desc-container"></div>
+</div>
+
+<div id="container"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const APPLAUSE_URL = 'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3';
+    const applauseSfx = new Audio(APPLAUSE_URL);
+
+    function playDing() {
+        const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+    }
+
+    function playErrorSound() {
+        const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+        osc.type = 'sawtooth'; osc.frequency.setValueAtTime(120, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime); gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3);
+        osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+    }
+
+    function playVictorySound() {
+        [100, 400, 200, 600].forEach((freq, i) => {
+            const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+            osc.type = 'square'; osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime + i*0.15); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + i*0.15 + 0.1);
+            osc.connect(gain); gain.connect(audioCtx.destination); osc.start(audioCtx.currentTime + i*0.15); osc.stop(audioCtx.currentTime + i*0.15 + 0.1);
+        });
+        applauseSfx.currentTime = 0; applauseSfx.play();
+    }
+
+    function handleReload() { playDing(); setTimeout(() => location.reload(), 300); }
+
+    // --- 数据结构 (简体 + 宽容关键字) ---
+    const UNLOCKED_STAGES = { 1:false, 2:false, 3:false, 4:false, 5:false, 6:false };
+    const DATA = {
+        1: { name: "黄色", kws: ["忠于君国", "忠于", "君国", "忠", "国"], status: [false], points: ["象征{0}。"], uiHex: "#ffcc00" },
+        2: { name: "蓝色", kws: ["团结一致", "团结"], status: [false], points: ["象征多元族群{0}。"], uiHex: "#3399ff" },
+        3: { name: "红色", kws: ["勇敢"], status: [false], points: ["象征人民{0}面对挑战。"], uiHex: "#ff3333" },
+        4: { name: "白色", kws: ["纯洁", "真诚"], status: [false, false], points: ["象征{0}和{1}。"], uiHex: "#ffffff" },
+        5: { name: "新月", kws: ["伊斯兰教"], status: [false], points: ["象征{0}是马来西亚的联邦宗教。"], uiHex: "#ffcc00" },
+        6: { name: "14角星与14道条纹", kws: ["13个州", "联邦直辖区"], status: [false, false], points: ["象征{0}和{1}的团结。"], uiHex: "#ffcc00" }
+    };
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = SpeechRecognition ? new SpeechRecognition() : null;
+    if (rec) {
+        rec.lang = 'zh-CN'; rec.continuous = true;
+        rec.onresult = (e) => {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const result = e.results[e.results.length - 1][0].transcript;
+            const data = DATA[currentMode];
+            if (data) {
+                let newlyUnlocked = false; let matchedSomething = false;
+                
+                // 特殊增强逻辑：如果是黄色手势，只要一句话里同时有“忠”和“国”，就算对
+                if (currentMode === 1 && result.includes('忠') && result.includes('国')) {
+                    if(!data.status[0]) { data.status[0] = true; newlyUnlocked = true; matchedSomething = true; }
+                }
+
+                data.kws.forEach((kw, idx) => { 
+                    if (result.includes(kw)) { 
+                        matchedSomething = true;
+                        let targetIdx = (data.kws.length > data.status.length) ? 0 : idx; 
+                        if(!data.status[targetIdx]) { data.status[targetIdx] = true; newlyUnlocked = true; }
+                    } 
+                });
+
+                if (newlyUnlocked) {
+                    playDing();
+                    UNLOCKED_STAGES[currentMode] = data.status.every(s => s);
+                    updateUI();
+                    window.allFinishedFlag = Object.values(DATA).every(item => item.status.every(s => s === true));
+                } else if (!matchedSomething) { playErrorSound(); }
+            }
+        };
+    }
+
+    let scene, camera, renderer, particles, particleMeta = [];
+    let currentMode = 0;
+    const FLAG_URL = "https://2.bp.blogspot.com/-eebZvbZ1IVc/VAaQ9l_EpMI/AAAAAAAAKD8/rcoJeurNglc/s1600/Bendera%2BMalaysia%2B-%2BJalur%2BGemilang.png";
+
+    function init() {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 5000);
+        camera.position.z = 900;
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('container').appendChild(renderer.domElement);
+        const img = new Image(); img.crossOrigin = "anonymous"; img.src = FLAG_URL;
+        img.onload = () => {
+            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+            canvas.width = 512; canvas.height = 256;
+            ctx.drawImage(img, 0, 0, 512, 256);
+            const imgData = ctx.getImageData(0,0,512,256).data;
+            const pos = [], col = [];
+            for(let y=0; y<256; y+=1.2){
+                for(let x=0; x<512; x+=1.2){
+                    let i = (Math.floor(y)*512 + Math.floor(x))*4;
+                    if(imgData[i+3] > 128){
+                        let vx = (x - 256) * 1.8, vy = -(y - 128) * 1.8;
+                        pos.push(vx, vy, 0);
+                        let r = imgData[i]/255, g = imgData[i+1]/255, b = imgData[i+2]/255;
+                        col.push(0.1, 0.1, 0.1); 
+                        let gid = 0;
+                        if (r > 0.6 && g > 0.5 && b < 0.4) gid = 1; 
+                        else if (b > 0.3 && b > r) gid = 2;
+                        else if (r > 0.6 && g < 0.4 && b < 0.4) gid = 3;
+                        else if (r > 0.8 && g > 0.8 && b > 0.8) gid = 4;
+                        let type = gid, unlockId = gid;
+                        if(gid === 1) { 
+                            const dx = x - 166, dy = y - 64;
+                            if (dx*dx + dy*dy < 2800) { type = 7; unlockId = 6; } 
+                            else { type = 5; unlockId = 5; }
+                        }
+                        particleMeta.push({ ox:vx, oy:vy, type:type, unlockId:unlockId, r, g, b });
+                    }
+                }
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+            particles = new THREE.Points(geo, new THREE.PointsMaterial({size: 3, vertexColors: true, transparent:true}));
+            scene.add(particles);
+            setTimeout(setupHands, 1000);
+        };
+        animate();
+    }
+
+    async function setupHands() {
+        const video = document.createElement('video');
+        video.autoplay = true; video.muted = true; video.playsInline = true; video.style.display = 'none';
+        document.body.appendChild(video);
+        const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        hands.onResults(res => {
+            let mode = 0;
+            if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+                const marks = res.multiHandLandmarks[0];
+                let f = [marks[8].y < marks[6].y, marks[12].y < marks[10].y, marks[16].y < marks[14].y, marks[20].y < marks[18].y];
+                let thumb = Math.hypot(marks[4].x - marks[17].x, marks[4].y - marks[17].y) > 0.1;
+                let count = f.filter(v => v).length;
+                if(thumb && count === 4) mode = 5; 
+                else if(thumb && f[3] && !f[0]) mode = 6; 
+                else mode = count;
+            }
+            if (window.allFinishedFlag && mode === 0 && !window.victoryPlayed) {
+                window.victoryPlayed = true; document.getElementById('victory-screen').style.display = 'block'; playVictorySound();
+            }
+            if(currentMode !== mode) {
+                currentMode = mode;
+                if(mode > 0 && rec) { try{rec.start();}catch(e){} document.getElementById('mic-status').style.display='block'; }
+                updateUI();
+            }
+        });
+        new Camera(video, { onFrame: async () => { await hands.send({image: video}); }, width: 640, height: 480 }).start();
+    }
+
+    function updateUI() {
+        const panel = document.getElementById('info-panel');
+        const descContainer = document.getElementById('info-desc');
+        const config = DATA[currentMode];
+        if (config) {
+            document.getElementById('info-title').innerText = config.name;
+            document.getElementById('info-title').style.color = config.uiHex;
+            descContainer.innerHTML = "";
+            config.points.forEach(text => {
+                let html = text;
+                config.kws.filter(k => k.length > 1).forEach((kw, i) => {
+                    const isFound = config.status[i];
+                    html = html.replace(`{${i}}`, `<span class="${isFound?'kw-found':'kw-locked'}">${isFound?kw:'( ? )'}</span>`);
+                });
+                const item = document.createElement('div');
+                item.className = 'point-item'; item.style.borderLeftColor = config.uiHex;
+                item.innerHTML = html; descContainer.appendChild(item);
+            });
+            if(currentMode === 6) panel.classList.add('layout-6'); else panel.classList.remove('layout-6');
+            panel.classList.add('active');
+        } else { panel.classList.remove('active'); }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if(!particles) return;
+        const posAttr = particles.geometry.attributes.position;
+        const colAttr = particles.geometry.attributes.color;
+        for(let i=0; i<particleMeta.length; i++){
+            const m = particleMeta[i];
+            let tx = m.ox, ty = m.oy, tz = 0, br = 1.0;
+            if (currentMode >= 1 && currentMode <= 5) {
+                let isMatch = (m.type === currentMode || (currentMode === 1 && (m.type === 5 || m.type === 7)));
+                if (isMatch) { tx = m.ox * 0.8; ty = m.oy * 0.8 + 80; tz = 180; } else { tz = -600; br = 0.1; }
+            } else if (currentMode === 6) { 
+                if (m.type === 3 || m.type === 4) { tx = m.ox * 0.5 - 320; ty = m.oy * 0.5 - 180; } 
+                else if (m.type === 7) { tx = m.ox * 1.2 - 120; ty = m.oy * 1.2 + 40; tz = 100; } 
+                else { tz = -600; br = 0.1; }
+            }
+            let isLit = currentMode === 0 ? (UNLOCKED_STAGES[m.unlockId] || (UNLOCKED_STAGES[1] && (m.unlockId === 5 || m.unlockId === 6))) : (currentMode === 1 ? UNLOCKED_STAGES[1] : (DATA[currentMode] && DATA[currentMode].status.every(s => s)));
+            let gray = (m.r + m.g + m.b) / 3 * 0.25;
+            let r = isLit ? m.r : gray, g = isLit ? m.g : gray, b = isLit ? m.b : gray;
+            let cX = posAttr.getX(i), cY = posAttr.getY(i), cZ = posAttr.getZ(i);
+            posAttr.setXYZ(i, cX+(tx-cX)*0.1, cY+(ty-cY)*0.1, cZ+(tz-cZ)*0.1);
+            colAttr.setXYZ(i, r * br, g * br, b * br);
+        }
+        posAttr.needsUpdate = true; colAttr.needsUpdate = true;
+        renderer.render(scene, camera);
+    }
+    window.onload = init;
+</script>
+</body>
+</html>
